@@ -181,9 +181,14 @@ impl Package for Deb {
         let full_version = full_version.trim();
 
         // Get all fields
+        // The "epoch" capture group is an unbounded run of digits, so it can
+        // be too long to fit in a u64. Fall back to 0 rather than panicking
+        // on a malformed-but-regex-matching epoch, same as when the
+        // (optional) group is absent entirely.
         let (epoch, upstream_version, debian_revision) = match RE_VERSION.captures(full_version) {
             Some(c) => (
-                c.name("epoch").map_or(0, |m| m.as_str().parse().unwrap()), //Defaults to 0
+                c.name("epoch")
+                    .map_or(0, |m| m.as_str().parse().unwrap_or(0)),
                 c.name("upstream").map_or("", |m| m.as_str()),
                 c.name("revision").map_or("", |m| m.as_str()),
             ),
@@ -192,7 +197,7 @@ impl Package for Deb {
                     return None;
                 }
                 Some(c) => (
-                    c.get(1).map_or(0, |m| m.as_str().parse().unwrap()), //Defaults to 0
+                    c.get(1).map_or(0, |m| m.as_str().parse().unwrap_or(0)),
                     c.get(2).map_or("", |m| m.as_str()),
                     "",
                 ),
@@ -493,5 +498,25 @@ mod deb_tests {
             DebianPackageVersion("2.20160614".to_string())
         );
         assert_eq!(package.get_version(), "11.2.2-2.20160614");
+    }
+
+    #[test]
+    fn test_oversized_epoch_does_not_panic() {
+        // Regression test: the "epoch" capture group is an unbounded run of
+        // digits, so a target reporting a package with an implausibly large
+        // epoch must not panic - it should fall back to epoch 0.
+        let huge_epoch = "9".repeat(30);
+
+        let package =
+            Deb::from_name_and_full_version("mesa-libgbm", &format!("{huge_epoch}:11.2.2"))
+                .unwrap();
+        assert_eq!(package.epoch, 0);
+
+        let package = Deb::from_name_and_full_version(
+            "mesa-libgbm",
+            &format!("{huge_epoch}:11.2.2-2.20160614"),
+        )
+        .unwrap();
+        assert_eq!(package.epoch, 0);
     }
 }

@@ -202,9 +202,12 @@ impl Package for EBuild {
             let name = caps.name("name")?.as_str();
             let version = caps.name("version")?.as_str();
             let suffix = caps.name("suffix")?.as_str();
+            // The "revision" capture group is an unbounded run of digits, so
+            // it can be too long to fit in a u64. Fall back to 0 rather than
+            // panicking on a malformed-but-regex-matching revision.
             let revision = caps
                 .name("revision")
-                .map(|r| r.as_str().parse::<u64>().unwrap())
+                .map(|r| r.as_str().parse::<u64>().unwrap_or_default())
                 .unwrap_or_default();
             Some(EBuild {
                 path: path.into(),
@@ -233,9 +236,10 @@ impl Package for EBuild {
             RE_VERSION.captures(full_version).and_then(|caps| {
                 let version = caps.name("version")?.as_str();
                 let suffix = caps.name("suffix")?.as_str();
+                // Same overflow guard as in `from_full_name`.
                 let revision = caps
                     .name("revision")
-                    .map(|r| r.as_str().parse::<u64>().unwrap())
+                    .map(|r| r.as_str().parse::<u64>().unwrap_or_default())
                     .unwrap_or_default();
 
                 Some((version.into(), suffix.into(), revision))
@@ -312,6 +316,25 @@ mod ebuild_tests {
         assert_eq!(ebuild.revision, 2);
         assert_eq!(ebuild.get_name(), "some/path/www-servers/apache");
         assert_eq!(ebuild.get_version(), "2.4.51-r2");
+    }
+
+    #[test]
+    fn test_oversized_revision_does_not_panic() {
+        // Regression test: the "revision" capture group is an unbounded run
+        // of digits, so a target reporting a package with an implausibly
+        // large revision must not panic - it should fall back to 0.
+        let huge_revision = "9".repeat(30);
+
+        let ebuild =
+            EBuild::from_full_name(&format!("www-servers/apache-2.4.51-r{huge_revision}")).unwrap();
+        assert_eq!(ebuild.revision, 0);
+
+        let ebuild = EBuild::from_name_and_full_version(
+            "www-servers/apache",
+            &format!("2.4.51-r{huge_revision}"),
+        )
+        .unwrap();
+        assert_eq!(ebuild.revision, 0);
     }
 
     #[test]

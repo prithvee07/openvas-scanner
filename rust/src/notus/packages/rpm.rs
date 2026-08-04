@@ -150,8 +150,11 @@ impl Package for Rpm {
                     c.name("module_stream").map_or("", |m| m.as_str()),
                 ),
             };
-        // parse epoch to u64. If should never fail. Therefore I let it panic
-        let epoch = epoch_str.parse::<u64>().unwrap();
+        // The "epoch" capture group is an unbounded run of digits (`\d+`), so
+        // it can be too long to fit in a u64 (e.g. a target reporting a
+        // package with an implausibly large epoch). Fall back to 0 rather
+        // than panicking on a malformed-but-regex-matching epoch.
+        let epoch = epoch_str.parse::<u64>().unwrap_or(0);
 
         let mut full_version = epoch_str.to_owned();
         full_version.push(':');
@@ -202,8 +205,11 @@ impl Package for Rpm {
                 ),
             };
 
-        // parse epoch to u64. If should never fail. Therefore I let it panic
-        let epoch = epoch_str.parse::<u64>().unwrap();
+        // The "epoch" capture group is an unbounded run of digits (`\d+`), so
+        // it can be too long to fit in a u64 (e.g. a target reporting a
+        // package with an implausibly large epoch). Fall back to 0 rather
+        // than panicking on a malformed-but-regex-matching epoch.
+        let epoch = epoch_str.parse::<u64>().unwrap_or(0);
 
         let mut full_name = name.to_owned();
         full_name.push('-');
@@ -717,5 +723,20 @@ mod rpm_tests {
         assert_eq!(package.release, PackageVersion("26.h1".to_string()));
         assert_eq!(package.get_version(), "1.6.3-26.h1.x86_64");
         assert_eq!(package.module, ("nodejs".to_string(), "16".to_string()));
+    }
+
+    #[test]
+    fn test_oversized_epoch_does_not_panic() {
+        // Regression test: the "epoch" capture group is an unbounded run of
+        // digits, so a target reporting a package with an implausibly large
+        // epoch must not panic - it should fall back to epoch 0.
+        let huge_epoch = "9".repeat(30);
+
+        let package = Rpm::from_full_name(&format!("foo-{huge_epoch}:1.0-1.x86_64")).unwrap();
+        assert_eq!(package.epoch, 0);
+
+        let package =
+            Rpm::from_name_and_full_version("foo", &format!("{huge_epoch}:1.0-1.x86_64")).unwrap();
+        assert_eq!(package.epoch, 0);
     }
 }
